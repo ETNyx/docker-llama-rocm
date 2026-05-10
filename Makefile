@@ -21,6 +21,14 @@ QWEN36_REPO    = unsloth/Qwen3.6-35B-A3B-GGUF
 QWEN36_PATTERN = *UD-Q4_K_XL*
 QWEN36_FILE    = /models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
 
+GEMMA4_REPO    = unsloth/gemma-4-E4B-it-GGUF
+GEMMA4_PATTERN = *Q8_0*
+GEMMA4_FILE    = /models/gemma-4-E4B-it-Q8_0.gguf
+
+GEMMA4_26B_REPO    = unsloth/gemma-4-26B-A4B-it-GGUF
+GEMMA4_26B_PATTERN = *UD-Q4_K_XL*
+GEMMA4_26B_FILE    = /models/gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf
+
 build:
 	docker build \
 		-t docker-llama-rocm \
@@ -58,6 +66,8 @@ run:
 		-e MODEL_ALIAS="$(MODEL_ALIAS)" \
 		-e N_CPU_MOE=$(N_CPU_MOE) \
 		-e CTX_SIZE=$(CTX_SIZE) \
+		-e EXTRA_ARGS="$(EXTRA_ARGS)" \
+		-e ENABLE_THINKING="$(ENABLE_THINKING)" \
 		-p $(PORT):8080 \
 		-v $(PWD)/models:/models \
 		--name llama \
@@ -88,8 +98,24 @@ download-coder:
 download-3.6:
 	$(MAKE) download HF_REPO="$(QWEN36_REPO)" HF_PATTERN="$(QWEN36_PATTERN)"
 
+download-gemma4:
+	$(MAKE) download HF_REPO="$(GEMMA4_REPO)" HF_PATTERN="$(GEMMA4_PATTERN)"
+
+download-gemma4-26b:
+	$(MAKE) download HF_REPO="$(GEMMA4_26B_REPO)" HF_PATTERN="$(GEMMA4_26B_PATTERN)"
+
 run-coder:
 	$(MAKE) run MODEL_FILE="$(CODER_FILE)" MODEL_ALIAS="qwen3-coder-30b" N_CPU_MOE=24 CTX_SIZE=131072
 
 run-3.6:
 	$(MAKE) run MODEL_FILE="$(QWEN36_FILE)" MODEL_ALIAS="qwen3.6-35b" N_CPU_MOE=34 CTX_SIZE=262144
+
+run-gemma4:
+	$(MAKE) run MODEL_FILE="$(GEMMA4_FILE)" MODEL_ALIAS="gemma-4-e4b" N_CPU_MOE=0 CTX_SIZE=32768 \
+		ENABLE_THINKING=true \
+		EXTRA_ARGS='--temp 1.0 --top-p 0.95 --top-k 64'
+
+run-gemma4-26b:
+	$(MAKE) run MODEL_FILE="$(GEMMA4_26B_FILE)" MODEL_ALIAS="gemma-4-26b" N_CPU_MOE=24 CTX_SIZE=131072 \
+		ENABLE_THINKING=true \
+		EXTRA_ARGS='--temp 1.0 --top-p 0.95 --top-k 64'

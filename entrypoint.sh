@@ -22,6 +22,13 @@ PORT="${PORT:-8080}"
 MODEL_ALIAS="${MODEL_ALIAS:-$(basename "${MODEL_FILE}" .gguf)}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 
+# ENABLE_THINKING=true|false toggles Gemma 4 / Qwen3 reasoning mode without
+# fighting Makefile/docker quoting around the JSON payload.
+THINKING_ARGS=()
+if [ -n "${ENABLE_THINKING}" ]; then
+    THINKING_ARGS=(--chat-template-kwargs "{\"enable_thinking\":${ENABLE_THINKING}}")
+fi
+
 echo "▶ Starting llama-server"
 echo "  model:         ${MODEL_FILE}"
 echo "  ctx:           ${CTX_SIZE}"
@@ -43,4 +50,6 @@ exec llama-server \
     --no-mmap \
     --mlock \
     --jinja \
+    --metrics \
+    "${THINKING_ARGS[@]}" \
     ${EXTRA_ARGS}
