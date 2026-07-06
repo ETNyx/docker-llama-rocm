@@ -8,12 +8,15 @@
 # Optional env vars:
 #   RATE_LIMIT     download cap in KB/s (e.g. 5000 for ~5 MB/s). Empty = unlimited.
 #   HF_TOKEN       HuggingFace token for gated repos.
+#   SUBDIR         subdir under /models to download into (e.g. gemma-4-12b).
+#                  Keeps each model's files — notably mmproj — separated.
 set -e
 
 REPO="${1:?repo id required, e.g. unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF}"
 PATTERN="${2:?file pattern required, e.g. *Q4_K_M*}"
 
-mkdir -p /models
+DEST="/models${SUBDIR:+/${SUBDIR}}"
+mkdir -p "${DEST}"
 
 # Resolve matching files → list of "filename<TAB>url" via HF API.
 mapfile -t ENTRIES < <(python - "${REPO}" "${PATTERN}" <<'EOF'
@@ -31,7 +34,7 @@ EOF
 )
 
 ARIA_ARGS=(
-    --dir=/models
+    --dir="${DEST}"
     --continue=true
     --max-connection-per-server=8
     --split=8
@@ -57,5 +60,5 @@ for entry in "${ENTRIES[@]}"; do
     aria2c "${ARIA_ARGS[@]}" --out="${fname}" "${url}"
 done
 
-echo "✓ Done. Files in /models:"
-ls -lh /models/*.gguf 2>/dev/null || ls -lh /models
+echo "✓ Done. Files in ${DEST}:"
+ls -lh "${DEST}"/*.gguf 2>/dev/null || ls -lh "${DEST}"
