@@ -70,6 +70,26 @@ QWEN3VL_8B_FILE    = /models/$(QWEN3VL_8B_DIR)/Qwen3-VL-8B-Instruct-Q8_0.gguf
 QWEN3VL_8B_MMPROJ_PATTERN = *mmproj-F16*
 QWEN3VL_8B_MMPROJ_FILE    = /models/$(QWEN3VL_8B_DIR)/mmproj-F16.gguf
 
+# Qwythos-9B-Claude-Mythos-5-1M — dense Qwen3.5-9B fine-tune (empero-ai).
+# The MTP variant carries the NextN/MTP draft head → self-speculative decoding
+# via --spec-type draft-mtp (single MTP block, supported for dense Qwen3.5 in this
+# llama.cpp build; see src/models/qwen35.cpp graph_mtp). No separate draft model.
+# DEFAULT Q6_K: near-lossless vs Q8 (+~0.2 % ppl, neměřitelné na benchmarcích), ale
+# ~2.2 GB menší → víc VRAM na kontext / KV / sloty. dense → N_CPU_MOE=0.
+QWYTHOS_DIR     = qwythos-9b
+QWYTHOS_REPO    = empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF
+QWYTHOS_PATTERN = *MTP-Q6_K*
+QWYTHOS_FILE    = /models/$(QWYTHOS_DIR)/Qwythos-9B-Claude-Mythos-5-1M-MTP-Q6_K.gguf
+# Q8_0 varianta (bezztrátová, ale +2.2 GB VRAM) — download-qwythos-q8 / run-qwythos-q8.
+QWYTHOS_Q8_PATTERN = *MTP-Q8_0*
+QWYTHOS_Q8_FILE    = /models/$(QWYTHOS_DIR)/Qwythos-9B-Claude-Mythos-5-1M-MTP-Q8_0.gguf
+
+# Multimodal projector — enables vision/image input for the Qwythos model.
+# llama.cpp podporuje jen QWEN2VL/QWEN25VL/QWEN3VL projektory — pokud tenhle mmproj
+# není žádný z nich, server ho při startu odmítne → pak mmproj vynech (text-only).
+QWYTHOS_MMPROJ_PATTERN = *mmproj*F16*
+QWYTHOS_MMPROJ_FILE    = /models/$(QWYTHOS_DIR)/mmproj-Qwythos-9B-Claude-Mythos-5-1M-F16.gguf
+
 build:
 	docker build \
 		-t docker-llama-rocm \
@@ -174,6 +194,15 @@ download-qwen3-vl-8b:
 download-qwen3-vl-8b-mmproj:
 	$(MAKE) download SUBDIR="$(QWEN3VL_8B_DIR)" HF_REPO="$(QWEN3VL_8B_REPO)" HF_PATTERN="$(QWEN3VL_8B_MMPROJ_PATTERN)"
 
+download-qwythos:
+	$(MAKE) download SUBDIR="$(QWYTHOS_DIR)" HF_REPO="$(QWYTHOS_REPO)" HF_PATTERN="$(QWYTHOS_PATTERN)"
+
+download-qwythos-q8:
+	$(MAKE) download SUBDIR="$(QWYTHOS_DIR)" HF_REPO="$(QWYTHOS_REPO)" HF_PATTERN="$(QWYTHOS_Q8_PATTERN)"
+
+download-qwythos-mmproj:
+	$(MAKE) download SUBDIR="$(QWYTHOS_DIR)" HF_REPO="$(QWYTHOS_REPO)" HF_PATTERN="$(QWYTHOS_MMPROJ_PATTERN)"
+
 run-coder:
 	$(MAKE) run MODEL_FILE="$(CODER_FILE)" MODEL_ALIAS="Qwen3-Coder-30B-A3B-Instruct" N_CPU_MOE=24 CTX_SIZE=131072
 
@@ -235,3 +264,51 @@ run-qwen3-vl-8b:
 		MMPROJ_FILE="$(QWEN3VL_8B_MMPROJ_FILE)" N_CPU_MOE=0 CTX_SIZE=32768 \
 		ENABLE_THINKING=false \
 		EXTRA_ARGS='--temp 0.7 --top-p 0.8 --top-k 20 $(EXTRA)'
+
+# Qwythos-9B — dense, vejde se celý na GPU (N_CPU_MOE=0).
+# --spec-type draft-mtp zapne self-speculative dekódování přes vestavěnou MTP/NextN
+#   hlavu (žádný samostatný draft model; MTP draft kontext běží na tomhle modelu).
+#   POZOR: serverový flag je --spec-type draft-mtp; --mtp je jen download flag.
+# Reasoning model → --reasoning on. Sampling dle model cardu.
+#
+# run-qwythos: TEXT-ONLY (bez mmproj), Q6_K váhy. 192K kontext při zachování MTP.
+#   192K je pod n_ctx_train (1M) → žádný rope-scaling penalt. Model má hybridní
+#   attention (qwen35.full_attention_interval=4 → 3/4 vrstev sliding-window), takže
+#   KV cache roste sublineárně. S Q6 je na 16 GB rezerva ~4 GB → lze i 256K
+#   (CTX_SIZE=262144) nebo upgrade KV na q8_0 (CACHE_TYPE_K/V=q8_0). KV default q4_0.
+#   Default sloty (kv_unified) sdílí CTX → N souběžných agentů, každý ~CTX/N.
+# Extra flagy z příkazové řádky: make run-qwythos EXTRA='--parallel 8'
+run-qwythos:
+	$(MAKE) run MODEL_FILE="$(QWYTHOS_FILE)" MODEL_ALIAS="Qwythos-9B-Claude-Mythos-5-1M" \
+		N_CPU_MOE=0 CTX_SIZE=196608 \
+		ENABLE_THINKING=true \
+		EXTRA_ARGS='--spec-type draft-mtp --temp 0.6 --top-p 0.95 --top-k 20 --repeat-penalty 1.05 $(EXTRA)'
+
+# run-qwythos-q8: stejné jako run-qwythos, ale Q8_0 váhy (bezztrátové, +2.2 GB VRAM).
+#   Na 16 GB je 192K Q8 ~92 % VRAM; pro delší kontext použij Q6 default.
+run-qwythos-q8:
+	$(MAKE) run MODEL_FILE="$(QWYTHOS_Q8_FILE)" MODEL_ALIAS="Qwythos-9B-Claude-Mythos-5-1M" \
+		N_CPU_MOE=0 CTX_SIZE=196608 \
+		ENABLE_THINKING=true \
+		EXTRA_ARGS='--spec-type draft-mtp --temp 0.6 --top-p 0.95 --top-k 20 --repeat-penalty 1.05 $(EXTRA)'
+
+# run-qwythos-vision: S VISION (mmproj) — obraz na vstupu. Kratší kontext (32K)
+#   kvůli VRAM (mmproj ~0.9 GB + KV). Projektor je Qwen-VL; pro grounding/detekci
+#   zvaž EXTRA='--image-min-tokens 1024'. Pokud dojde VRAM, sniž CTX_SIZE nebo
+#   vypni MTP (EXTRA_ARGS bez --spec-type draft-mtp).
+run-qwythos-vision:
+	$(MAKE) run MODEL_FILE="$(QWYTHOS_FILE)" MODEL_ALIAS="Qwythos-9B-Claude-Mythos-5-1M" \
+		MMPROJ_FILE="$(QWYTHOS_MMPROJ_FILE)" N_CPU_MOE=0 CTX_SIZE=32768 \
+		ENABLE_THINKING=true \
+		EXTRA_ARGS='--spec-type draft-mtp --temp 0.6 --top-p 0.95 --top-k 20 --repeat-penalty 1.05 $(EXTRA)'
+
+# run-qwythos-parallel: pro SOUBĚŽNÉ sub-agenty. Text-only, 192K, ale MTP VYPNUTÉ
+#   (--spec-type none). MTP je optimalizace pro jeden stream — při víc slotech
+#   nedokáže dávkovat draft přes sloty a agregátní propustnost naopak kolabuje
+#   (sólo ~105 t/s vs 4 sloty s MTP jen ~40 t/s agregát). Bez spekulace se sloty
+#   dávkují normálně → vyšší agregátní throughput při paralelní zátěži.
+run-qwythos-parallel:
+	$(MAKE) run MODEL_FILE="$(QWYTHOS_FILE)" MODEL_ALIAS="Qwythos-9B-Claude-Mythos-5-1M" \
+		N_CPU_MOE=0 CTX_SIZE=196608 \
+		ENABLE_THINKING=true \
+		EXTRA_ARGS='--spec-type none --temp 0.6 --top-p 0.95 --top-k 20 --repeat-penalty 1.05 $(EXTRA)'
